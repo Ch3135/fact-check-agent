@@ -1,37 +1,61 @@
-"""Small wrapper around the Vercel AI Gateway (OpenAI compatible API).
+"""Model calls. Two OpenAI compatible providers are supported:
 
-On Vercel the gateway accepts the deployment's OIDC token, so no provider
-keys are needed. Locally, set AI_GATEWAY_API_KEY instead.
+  gateway  Vercel AI Gateway. On Vercel it accepts the deployment's OIDC
+           token, locally it needs AI_GATEWAY_API_KEY.
+  groq     Groq, with GROQ_API_KEY. Its gpt-oss models can also run a live
+           web search (browser_search tool), which we use when the cheaper
+           sources don't settle a claim.
+
+Gateway is tried first when it is configured. If it refuses (no credits,
+bad auth) it is skipped for a few minutes and Groq takes over.
 """
 import asyncio
 import json
 import os
 import re
+import time
 
 import httpx
 
-# Any OpenAI compatible endpoint works here; the gateway is the default.
-GATEWAY_URL = os.getenv("LLM_BASE_URL", "https://ai-gateway.vercel.sh/v1")
+GATEWAY_URL = "https://ai-gateway.vercel.sh/v1"
+GROQ_URL = "https://api.groq.com/openai/v1"
+
+MODELS = {
+    "gateway": {
+        "extract": os.getenv("EXTRACT_MODEL", "openai/gpt-4.1-mini"),
+        "judge": os.getenv("JUDGE_MODEL", "openai/gpt-4.1"),
+        "search": os.getenv("SEARCH_MODEL", "perplexity/sonar"),
+    },
+    # Groq's free tier allows about 8k tokens a minute per model, so each
+    # task has backups that are tried when the first one is rate limited.
+    "groq": {
+        "extract": ["openai/gpt-oss-120b", "qwen/qwen3.8-27b"],
+        "judge": ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b"],
+        "search": ["openai/gpt-oss-20b", "openai/gpt-oss-120b"],
+    },
+}
+
+_skip_until: dict[str, float] = {}
 
 
 class LLMError(Exception):
     pass
 
 
-def _token(oidc_header: str | None) -> str:
-    token = os.getenv("LLM_API_KEY") or os.getenv("AI_GATEWAY_API_KEY") or oidc_header or os.getenv("VERCEL_OIDC_TOKEN")
-    if not token:
-        raise LLMError(
-            "No gateway credentials. Set AI_GATEWAY_API_KEY, or run on Vercel "
-            "where the OIDC token is provided automatically."
-        )
-    return token
+def _credentials(oidc: str | None) -> list[tuple[str, str, str]]:
+    """(name, base_url, token) for every provider that is set up, in order."""
+    out = []
+    gw = os.getenv("AI_GATEWAY_API_KEY") or oidc or os.getenv("VERCEL_OIDC_TOKEN")
+    if gw and os.getenv("DISABLE_GATEWAY") != "1":
+        out.append(("gateway", GATEWAY_URL, gw))
+    if os.getenv("GROQ_API_KEY"):
+        out.append(("groq", GROQ_URL, os.environ["GROQ_API_KEY"]))
+    return out
 
 
-# Optional backup model, any OpenAI compatible endpoint. Off unless set.
-FALLBACK_URL = os.getenv("FALLBACK_LLM_BASE_URL")
-FALLBACK_KEY = os.getenv("FALLBACK_LLM_API_KEY", "none")
-FALLBACK_MODEL = os.getenv("FALLBACK_LLM_MODEL", "openai")
+def available(oidc: str | None = None) -> list[str]:
+    now = time.time()
+    return [name for name, _, _ in _credentials(oidc) if _skip_until.get(name, 0) < now]
 
 
 async def _post(url: str, token: str, body: dict, timeout: float) -> httpx.Response:
@@ -41,60 +65,92 @@ async def _post(url: str, token: str, body: dict, timeout: float) -> httpx.Respo
         )
 
 
+def _wait_hint(r: httpx.Response) -> float:
+    try:
+        return float(r.headers.get("retry-after", "5"))
+    except ValueError:
+        return 5.0
+
+
 async def chat(
-    model: str,
+    task: str,
     messages: list[dict],
     *,
     oidc: str | None = None,
     json_mode: bool = False,
-    temperature: float = 0,
+    only: str | None = None,
+    web_search: bool = False,
     timeout: float = 90,
-    allow_fallback: bool = True,
 ) -> dict:
-    """Send one chat completion and return the text plus any citations.
+    """Run one completion for a task ("extract", "judge" or "search").
 
-    If the main endpoint refuses the request (no credits, auth, rate limit)
-    and FALLBACK_LLM_BASE_URL is set, the same prompt goes to the fallback.
+    Returns {"content", "citations", "provider", "model"}.
     """
-    body = {"model": model, "messages": messages, "temperature": temperature}
-    if json_mode:
-        body["response_format"] = {"type": "json_object"}
-
-    error = None
-    try:
-        r = await _post(GATEWAY_URL, _token(oidc), body, timeout)
-        if r.status_code == 200:
-            return _unpack(r.json())
-        error = f"{model} returned {r.status_code}: {r.text[:300]}"
-    except (httpx.HTTPError, LLMError) as exc:
-        error = f"{model} failed: {exc}"
-
-    if not (allow_fallback and FALLBACK_URL):
-        raise LLMError(error)
-
-    body["model"] = FALLBACK_MODEL
-    for attempt in range(3):
-        try:
-            r = await _post(FALLBACK_URL, FALLBACK_KEY, body, timeout)
-        except httpx.HTTPError as exc:
-            error = f"fallback failed: {exc}"
+    errors = []
+    now = time.time()
+    for name, url, token in _credentials(oidc):
+        if only and name != only:
             continue
-        if r.status_code == 200:
-            return _unpack(r.json(), fallback=True)
-        error = f"fallback returned {r.status_code}: {r.text[:200]}"
-        if r.status_code != 429:
-            break
-        await asyncio.sleep(3 * (attempt + 1))
-    raise LLMError(error)
+        if _skip_until.get(name, 0) > now:
+            continue
+
+        models = MODELS[name][task]
+        models = models if isinstance(models, list) else [models]
+        if web_search:
+            models = [m for m in models if m.startswith("openai/gpt-oss")]
+
+        res = await _try_models(name, url, token, task, models, messages, json_mode, web_search, timeout, errors)
+        if res:
+            return res
+
+    if not errors:
+        raise LLMError("No model provider is configured. Set GROQ_API_KEY or AI_GATEWAY_API_KEY.")
+    raise LLMError(" | ".join(errors))
 
 
-def _unpack(data: dict, fallback: bool = False) -> dict:
+async def _try_models(name, url, token, task, models, messages, json_mode, web_search, timeout, errors):
+    """Go through the models in order. On a rate limit move straight to the
+    next one; if all are limited, wait for the shortest reset and go again."""
+    deadline = time.time() + 60
+    while True:
+        waits = []
+        for model in models:
+            body = {"model": model, "messages": messages, "temperature": 0}
+            if json_mode and not web_search:
+                body["response_format"] = {"type": "json_object"}
+            if name == "groq" and model.startswith("openai/gpt-oss"):
+                body["reasoning_effort"] = "medium" if task == "judge" else "low"
+            if model.startswith("qwen/"):
+                body["reasoning_format"] = "hidden"  # keep <think> text out of the JSON
+            if web_search:
+                body["tools"] = [{"type": "browser_search"}]
+                body["tool_choice"] = "required"
+            try:
+                r = await _post(url, token, body, timeout)
+            except httpx.HTTPError as exc:
+                errors.append(f"{model}: {exc}")
+                continue
+            if r.status_code == 200:
+                return {**_unpack(r.json()), "provider": name, "model": model}
+            if r.status_code in (401, 402, 403):
+                # no credits or bad key, skip this provider for a while
+                _skip_until[name] = time.time() + 300
+                errors.append(f"{name} {r.status_code}: {r.text[:200]}")
+                return None
+            if r.status_code == 429:
+                waits.append(_wait_hint(r))
+                continue
+            errors.append(f"{model} {r.status_code}: {r.text[:200]}")
+        if not waits or time.time() + min(waits) > deadline:
+            if waits:
+                errors.append(f"{name}: rate limited")
+            return None
+        await asyncio.sleep(min(waits) + 0.5)
+
+
+def _unpack(data: dict) -> dict:
     msg = data["choices"][0]["message"]
-    return {
-        "content": msg.get("content") or "",
-        "citations": _collect_citations(data, msg),
-        "fallback": fallback,
-    }
+    return {"content": msg.get("content") or "", "citations": _collect_citations(data, msg)}
 
 
 def _collect_citations(data: dict, msg: dict) -> list[dict]:
@@ -102,10 +158,13 @@ def _collect_citations(data: dict, msg: dict) -> list[dict]:
     seen, out = set(), []
 
     def add(url, title=""):
-        # skip Google redirect links, they are useless to a reader
-        if url and url.startswith("http") and "google.com/goto" not in url and url not in seen:
-            seen.add(url)
-            out.append({"url": url, "title": title or ""})
+        if not url or not url.startswith("http") or url in seen:
+            return
+        # search-engine result pages and redirect links are no use to a reader
+        if "google.com/goto" in url or "exa.ai/search" in url:
+            return
+        seen.add(url)
+        out.append({"url": url, "title": title or ""})
 
     for ann in msg.get("annotations") or []:
         c = ann.get("url_citation") or ann
@@ -114,7 +173,12 @@ def _collect_citations(data: dict, msg: dict) -> list[dict]:
         add(item.get("url"), item.get("title"))
     for url in data.get("citations") or []:
         add(url if isinstance(url, str) else url.get("url"))
-    # last resort: plain links in the text
+    # Groq browser_search: pages the model opened
+    for tool in msg.get("executed_tools") or []:
+        if tool.get("name") == "browser.open":
+            m = re.search(r"URL:\s*\nL\d+:\s*(\S+)", tool.get("output") or "")
+            if m:
+                add(m.group(1))
     for url in re.findall(r"https?://[^\s\)\]\"'>]+", msg.get("content") or ""):
         add(url.rstrip(".,;"))
     return out

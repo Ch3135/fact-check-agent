@@ -4,8 +4,8 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from factcheck.checker import JUDGE_MODEL, MAX_CLAIMS, SEARCH_MODEL, extract_claims, verify_claim
-from factcheck.llm import LLMError
+from factcheck.checker import MAX_CLAIMS, extract_claims, verify_claim
+from factcheck.llm import LLMError, available
 from factcheck.pdf_text import PdfError, extract_text
 
 MAX_UPLOAD = 4 * 1024 * 1024  # Vercel caps request bodies at about 4.5 MB
@@ -30,8 +30,8 @@ def sample_pdf():
 
 
 @app.get("/api/health")
-def health():
-    return {"ok": True, "search_model": SEARCH_MODEL, "judge_model": JUDGE_MODEL, "max_claims": MAX_CLAIMS}
+def health(request: Request):
+    return {"ok": True, "providers": available(oidc_token(request)), "max_claims": MAX_CLAIMS}
 
 
 @app.post("/api/extract")
