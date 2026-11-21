@@ -28,8 +28,8 @@ def _token(oidc_header: str | None) -> str:
     return token
 
 
-# Free, keyless backup model. Set FALLBACK_LLM_BASE_URL="" to turn it off.
-FALLBACK_URL = os.getenv("FALLBACK_LLM_BASE_URL", "https://text.pollinations.ai/openai/v1")
+# Optional backup model, any OpenAI compatible endpoint. Off unless set.
+FALLBACK_URL = os.getenv("FALLBACK_LLM_BASE_URL")
 FALLBACK_KEY = os.getenv("FALLBACK_LLM_API_KEY", "none")
 FALLBACK_MODEL = os.getenv("FALLBACK_LLM_MODEL", "openai")
 
