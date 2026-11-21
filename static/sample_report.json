@@ -1,0 +1,82 @@
+{
+  "document": "sample_trap.pdf",
+  "mode": "sample",
+  "claims": [
+    {
+      "id": 1,
+      "page": 1,
+      "claim": "OpenAI launched ChatGPT in November 2020.",
+      "quote": "OpenAI launched ChatGPT in November 2020",
+      "verdict": "Inaccurate",
+      "correct_fact": "OpenAI introduced ChatGPT on November 30, 2022.",
+      "explanation": "OpenAI’s launch announcement gives the original release date.",
+      "sources": [
+        {
+          "title": "OpenAI launch announcement",
+          "url": "https://openai.com/index/chatgpt/"
+        }
+      ],
+      "search_engine": "saved source review",
+      "evidence": "OpenAI’s launch announcement gives the original release date.",
+      "state": "done",
+      "checked_on": "2026-11-21"
+    },
+    {
+      "id": 2,
+      "page": 1,
+      "claim": "Tesla delivered 5 million vehicles in 2023.",
+      "quote": "Tesla delivered 5 million vehicles in 2023 alone",
+      "verdict": "Inaccurate",
+      "correct_fact": "Tesla reported 1,808,581 total vehicle deliveries in 2023.",
+      "explanation": "Tesla’s full-year deliveries table gives the comparable total.",
+      "sources": [
+        {
+          "title": "Tesla 2023 vehicle delivery release",
+          "url": "https://ir.tesla.com/press-release/tesla-vehicle-production-deliveries-and-date-financial-results-webcast-fourth-quarter-2023"
+        }
+      ],
+      "search_engine": "saved source review",
+      "evidence": "Tesla’s full-year deliveries table gives the comparable total.",
+      "state": "done",
+      "checked_on": "2026-11-21"
+    },
+    {
+      "id": 3,
+      "page": 1,
+      "claim": "The Great Wall of China is visible from the Moon with the naked eye.",
+      "quote": "the Great Wall of China is the only man-made structure visible from the Moon with the naked eye",
+      "verdict": "False",
+      "correct_fact": "The Great Wall of China cannot be seen from the Moon with the naked eye.",
+      "explanation": "NASA directly addresses the lunar visibility claim.",
+      "sources": [
+        {
+          "title": "NASA Earth Observations FAQ",
+          "url": "https://eol.jsc.nasa.gov/faq/"
+        }
+      ],
+      "search_engine": "saved source review",
+      "evidence": "NASA directly addresses the lunar visibility claim.",
+      "state": "done",
+      "checked_on": "2026-11-21"
+    },
+    {
+      "id": 4,
+      "page": 1,
+      "claim": "The Eiffel Tower was completed in 1889.",
+      "quote": "The Eiffel Tower was completed in 1889",
+      "verdict": "Verified",
+      "correct_fact": "Construction of the Eiffel Tower was completed on March 31, 1889.",
+      "explanation": "The Eiffel Tower’s official history confirms the completion year.",
+      "sources": [
+        {
+          "title": "Official Eiffel Tower history",
+          "url": "https://www.toureiffel.paris/en/the-monument/history"
+        }
+      ],
+      "search_engine": "saved source review",
+      "evidence": "The Eiffel Tower’s official history confirms the completion year.",
+      "state": "done",
+      "checked_on": "2026-11-21"
+    }
+  ]
+}

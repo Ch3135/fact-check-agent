@@ -4,7 +4,6 @@ Sonar (through the AI Gateway) does its own web search and is the default.
 These two are used if it fails:
   - SerpAPI (Google results), when SERPAPI_API_KEY is set
   - Wikipedia, which needs no key
-Set SEARCH_BACKEND=serpapi to skip Sonar and always use Google results.
 """
 import asyncio
 import os
@@ -19,7 +18,7 @@ async def serpapi_search(query: str, num: int = 8) -> dict:
         raise RuntimeError("SERPAPI_API_KEY is not set")
 
     params = {"engine": "google", "q": query, "num": num, "api_key": key, "hl": "en"}
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=12) as client:
         r = await client.get("https://serpapi.com/search.json", params=params)
     r.raise_for_status()
     data = r.json()
@@ -48,7 +47,7 @@ async def serpapi_search(query: str, num: int = 8) -> dict:
 # Wikipedia needs no key, so it is the last backup. It is good for founders,
 # dates, populations and company figures, weaker for very recent numbers.
 WIKI_API = "https://en.wikipedia.org/w/api.php"
-WIKI_HEADERS = {"User-Agent": "fact-check-agent/1.0 (https://github.com/Ch3135/fact-check-agent)"}
+WIKI_HEADERS = {"User-Agent": "fact-check-agent/1.0 (https://github.com/subhamkr3135/fact-check-agent)"}
 STOP = set("the a an of in on and or to is was were are has have had with for from by at as that this its it be been".split())
 
 
@@ -81,7 +80,7 @@ def _best_sentences(text: str, keys: set[str], n: int) -> list[str]:
 
 
 async def wikipedia_search(claim: str, query: str, pages: int = 3) -> dict:
-    async with httpx.AsyncClient(timeout=20, headers=WIKI_HEADERS) as client:
+    async with httpx.AsyncClient(timeout=12, headers=WIKI_HEADERS) as client:
         r = await client.get(WIKI_API, params={
             "action": "query", "list": "search", "srsearch": query,
             "srlimit": pages, "format": "json",

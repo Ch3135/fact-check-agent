@@ -2,6 +2,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from factcheck.checker import MAX_CLAIMS, extract_claims, verify_claim
@@ -29,6 +30,11 @@ def sample_pdf():
     return FileResponse(STATIC / "sample_trap.pdf", media_type="application/pdf", filename="sample_trap.pdf")
 
 
+@app.get("/sample_report.json")
+def sample_report():
+    return FileResponse(STATIC / "sample_report.json", media_type="application/json")
+
+
 @app.get("/api/health")
 def health(request: Request):
     return {"ok": True, "providers": available(oidc_token(request)), "max_claims": MAX_CLAIMS}
@@ -36,23 +42,24 @@ def health(request: Request):
 
 @app.post("/api/extract")
 async def extract(request: Request, file: UploadFile = File(...)):
-    data = await file.read()
+    data = await file.read(MAX_UPLOAD + 1)
     if len(data) > MAX_UPLOAD:
         raise HTTPException(413, "File is over 4 MB. Try a smaller PDF.")
     if not data.startswith(b"%PDF"):
         raise HTTPException(400, "That does not look like a PDF file.")
 
     try:
-        text, pages = extract_text(data)
+        text, pages, truncated = await run_in_threadpool(extract_text, data)
     except PdfError as exc:
-        raise HTTPException(422, str(exc))
+        raise HTTPException(422, str(exc)) from exc
 
     try:
         claims = await extract_claims(text, oidc_token(request))
     except (LLMError, ValueError) as exc:
-        raise HTTPException(502, f"Claim extraction failed: {exc}")
+        raise HTTPException(502, "Claim extraction is temporarily unavailable. Try again or open the sample report.") from exc
 
-    return {"filename": file.filename, "pages": pages, "chars": len(text), "claims": claims}
+    return {"filename": file.filename, "pages": pages, "truncated": truncated,
+            "claim_limit_reached": len(claims) > MAX_CLAIMS, "claims": claims[:MAX_CLAIMS]}
 
 
 class VerifyIn(BaseModel):
@@ -67,4 +74,4 @@ async def verify(body: VerifyIn, request: Request):
     try:
         return await verify_claim(body.claim, body.search_query, oidc_token(request))
     except (LLMError, ValueError) as exc:
-        raise HTTPException(502, f"Check failed: {exc}")
+        raise HTTPException(502, "This claim could not be checked. Try again in a moment.") from exc

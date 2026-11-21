@@ -80,7 +80,7 @@ async def chat(
     json_mode: bool = False,
     only: str | None = None,
     web_search: bool = False,
-    timeout: float = 90,
+    timeout: float = 20,
 ) -> dict:
     """Run one completion for a task ("extract", "judge" or "search").
 
@@ -112,7 +112,7 @@ async def chat(
 async def _try_models(name, url, token, task, models, messages, json_mode, web_search, timeout, errors):
     """Go through the models in order. On a rate limit move straight to the
     next one; if all are limited, wait for the shortest reset and go again."""
-    deadline = time.time() + 60
+    deadline = time.time() + 12
     while True:
         waits = []
         for model in models:
@@ -159,7 +159,7 @@ def _collect_citations(data: dict, msg: dict) -> list[dict]:
     seen, out = set(), []
 
     def add(url, title=""):
-        if not url or not url.startswith("http") or url in seen:
+        if not isinstance(url, str) or not url.startswith(("https://", "http://")) or url in seen:
             return
         # search-engine result pages and redirect links are no use to a reader
         if "google.com/goto" in url or "exa.ai/search" in url:
@@ -180,8 +180,6 @@ def _collect_citations(data: dict, msg: dict) -> list[dict]:
             m = re.search(r"URL:\s*\nL\d+:\s*(\S+)", tool.get("output") or "")
             if m:
                 add(m.group(1))
-    for url in re.findall(r"https?://[^\s\)\]\"'>]+", msg.get("content") or ""):
-        add(url.rstrip(".,;"))
     return out
 
 
