@@ -8,6 +8,7 @@ These two are used if it fails:
 import asyncio
 import os
 import re
+from urllib.parse import quote
 
 import httpx
 
@@ -79,26 +80,37 @@ def _best_sentences(text: str, keys: set[str], n: int) -> list[str]:
     return [s for s in ranked[:n] if score(s) >= 3]
 
 
+async def _wiki_titles(client: httpx.AsyncClient, query: str, limit: int) -> list[str]:
+    response = await client.get(WIKI_API, params={
+        "action": "query", "list": "search", "srsearch": query,
+        "srlimit": limit, "format": "json",
+    })
+    response.raise_for_status()
+    return [hit["title"] for hit in response.json()["query"]["search"]]
+
+
 async def wikipedia_search(claim: str, query: str, pages: int = 3) -> dict:
+    subject, divider, metric = query.partition("|")
     async with httpx.AsyncClient(timeout=12, headers=WIKI_HEADERS) as client:
-        r = await client.get(WIKI_API, params={
-            "action": "query", "list": "search", "srsearch": query,
-            "srlimit": pages, "format": "json",
-        })
-        r.raise_for_status()
-        titles = [h["title"] for h in r.json()["query"]["search"]]
-        if not titles:
-            return {"content": "No results.", "citations": []}
-        texts = await asyncio.gather(*[_wiki_extract(client, t) for t in titles], return_exceptions=True)
+        focused = _wiki_titles(client, f"{subject.strip()} {metric.strip()}", pages)
+        if divider:
+            broad = _wiki_titles(client, subject.strip(), 1)
+            results = await asyncio.gather(broad, focused, return_exceptions=True)
+            titles = list(dict.fromkeys(title for result in results if isinstance(result, list) for title in result))
+            if not titles and all(isinstance(result, Exception) for result in results):
+                raise results[1]
+        else:
+            titles = await focused
+        texts = await asyncio.gather(*[_wiki_extract(client, title) for title in titles], return_exceptions=True)
 
     keys = _words(query) | _words(claim)
     lines, sources = [], []
-    for title, text in zip(titles, texts):
-        if isinstance(text, Exception) or not text:
+    for title, content in zip(titles, texts):
+        if isinstance(content, Exception) or not content:
             continue
-        intro = " ".join(re.split(r"(?<=[.!?])\s+", text.strip())[:2])
-        best = _best_sentences(text, keys, 8)
-        url = "https://en.wikipedia.org/wiki/" + title.replace(" ", "_")
-        lines.append(f"Wikipedia, {title} ({url}):\n{intro}\n" + "\n".join(f"- {s}" for s in best))
+        intro = " ".join(re.split(r"(?<=[.!?])\s+", content.strip())[:2])[:600]
+        best = _best_sentences(content, keys, 5)
+        url = "https://en.wikipedia.org/wiki/" + quote(title.replace(" ", "_"))
+        lines.append(f"Wikipedia, {title} ({url}):\n{intro}\n" + "\n".join(f"- {sentence}" for sentence in best))
         sources.append({"url": url, "title": title})
     return {"content": "\n\n".join(lines) or "No results.", "citations": sources}

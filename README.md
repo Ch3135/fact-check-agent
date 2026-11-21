@@ -2,7 +2,8 @@
 
 Upload a text-based PDF to verify checkable claims with current web evidence. The report shows the original quote and page, verdict, corrected fact when available, and sources. It exports CSV or JSON and can retry failed individual requests.
 
-**Public app** [fact-check-agent-ecru.vercel.app](https://fact-check-agent-ecru.vercel.app)  
+**Public app** [fact-check-agent-ecru.vercel.app](https://fact-check-agent-ecru.vercel.app)
+
 **Author** Shubham Kumar · Assessment Part 2
 
 ## Try it

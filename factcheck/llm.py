@@ -129,7 +129,7 @@ async def _try_models(name, url, token, task, models, messages, json_mode, web_s
             try:
                 r = await _post(url, token, body, timeout)
             except httpx.HTTPError as exc:
-                errors.append(f"{model}: {exc}")
+                errors.append(f"{model}: {type(exc).__name__}")
                 continue
             if r.status_code == 200:
                 return {**_unpack(r.json()), "provider": name, "model": model}
@@ -176,10 +176,14 @@ def _collect_citations(data: dict, msg: dict) -> list[dict]:
         add(url if isinstance(url, str) else url.get("url"))
     # Groq browser_search: pages the model opened
     for tool in msg.get("executed_tools") or []:
-        if tool.get("name") == "browser.open":
-            m = re.search(r"URL:\s*\nL\d+:\s*(\S+)", tool.get("output") or "")
-            if m:
-                add(m.group(1))
+        if tool.get("name") in ("browser.open", "open", "browser.search", "search"):
+            output = tool.get("output")
+            if not isinstance(output, str):
+                continue
+            for url in re.findall(r"(?im)^(?:L\d+:\s*)?URL:\s*(?:L\d+:\s*)?(https?://[^\s<>]+)", output):
+                add(url.rstrip(".,;)"))
+            for url in re.findall(r"\[[^\]\n]+\]\((https?://[^\s)]+)\)", output):
+                add(url)
     return out
 
 

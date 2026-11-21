@@ -41,7 +41,7 @@ Rules:
 Return JSON only:
 {{"claims": [{{"claim": "...", "quote": "short contiguous exact quote from one page, with no ellipses",
 "category": "statistic|date|financial|technical|person|other",
-"search_query": "a neutral web search query that would find the true figure. Leave out the document's own number, e.g. 'Tesla vehicle deliveries 2023', not 'Tesla 5 million deliveries'"}}]}}"""
+"search_query": "the main subject, a pipe, and the metric with its period. Example: 'Tesla, Inc. | vehicle deliveries full year 2023'. Exclude the value being checked"}}]}}"""
 
 
 RESEARCH_PROMPT = """Today is {today}. Find the most recent, reliable facts that
@@ -148,7 +148,7 @@ async def extract_claims(text: str, oidc: str | None = None) -> list[dict]:
 async def research(claim: str, query: str, oidc: str | None = None) -> dict:
     if "gateway" in available(oidc):
         try:
-            prompt = RESEARCH_PROMPT.format(today=today(), claim=claim, query=query)
+            prompt = RESEARCH_PROMPT.format(today=today(), claim=claim, query=query.replace("|", " "))
             res = await chat("search", [{"role": "user", "content": prompt}], oidc=oidc, only="gateway", timeout=20)
             if res["citations"] and res["content"].strip():
                 return {**res, "engine": "Perplexity Sonar"}
@@ -156,7 +156,7 @@ async def research(claim: str, query: str, oidc: str | None = None) -> dict:
             pass
     if os.getenv("SERPAPI_API_KEY"):
         try:
-            res = await serpapi_search(query)
+            res = await serpapi_search(query.replace("|", " "))
             if res["citations"]:
                 return {**res, "engine": "Google via SerpAPI"}
         except (httpx.HTTPError, ValueError):
@@ -175,7 +175,7 @@ async def research(claim: str, query: str, oidc: str | None = None) -> dict:
 
 
 async def web_search(claim: str, query: str, oidc: str | None = None) -> dict:
-    prompt = WEB_PROMPT.format(today=today(), claim=claim) + f"\nNeutral search query: {query}"
+    prompt = WEB_PROMPT.format(today=today(), claim=claim) + f"\nNeutral search query: {query.replace('|', ' ')}"
     res = await chat("search", [{"role": "user", "content": prompt}], oidc=oidc, only="groq", web_search=True)
     return {**res, "engine": "web search"}
 
