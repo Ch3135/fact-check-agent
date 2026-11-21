@@ -136,7 +136,7 @@
   <div id="results"></div>
 
   <footer>
-    <span>Built by Shubham Kumar. Search by Perplexity Sonar, checks by GPT-4.1, both through Vercel AI Gateway.</span>
+    <span>Built by Shubham Kumar. Live search with Perplexity Sonar (Google results as backup), verdicts by a separate checking model.</span>
     <a href="https://github.com/Ch3135/fact-check-agent">Source on GitHub</a>
   </footer>
 </div>
@@ -249,7 +249,7 @@ function render() {
       body = `
         <div class="fact"><b>${label}:</b> ${esc(c.correct_fact)}</div>
         <div class="why">${esc(c.explanation)}</div>
-        <div class="meta"><span class="conf">confidence ${c.confidence}%</span>${links}</div>
+        <div class="meta"><span class="conf">confidence ${c.confidence}%</span>${links}<span class="conf">via ${esc(c.search_engine || "search")}</span></div>
         <details><summary>Search notes</summary><pre>${esc(c.evidence)}</pre></details>`;
     }
     return `<div class="claim ${c.verdict || ""}">

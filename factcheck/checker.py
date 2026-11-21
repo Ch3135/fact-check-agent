@@ -17,11 +17,13 @@ import os
 from datetime import date
 
 from .llm import LLMError, chat, parse_json
+from .search import serpapi_search, wikipedia_search
 
 EXTRACT_MODEL = os.getenv("EXTRACT_MODEL", "openai/gpt-4.1-mini")
 SEARCH_MODEL = os.getenv("SEARCH_MODEL", "perplexity/sonar")
 JUDGE_MODEL = os.getenv("JUDGE_MODEL", "openai/gpt-4.1")
 MAX_CLAIMS = int(os.getenv("MAX_CLAIMS", "20"))
+SEARCH_BACKEND = os.getenv("SEARCH_BACKEND", "sonar")  # or "serpapi"
 
 VERDICTS = ("Verified", "Inaccurate", "False")
 
@@ -44,6 +46,8 @@ Rules:
 - Rewrite each claim so it makes sense on its own (resolve "it", "the
   company", "last year" using the document).
 - Keep the exact number or date the document uses. Do not correct anything.
+- When a sentence names a person in a role ("under CEO X"), add a separate
+  claim such as "X is the CEO of Y".
 - Skip opinions, slogans, predictions and vague statements with no figure
   or named fact.
 - At most {max_claims} claims. If there are more, keep the most specific and
@@ -89,6 +93,13 @@ Decide one verdict:
   evidence at all that it was ever true (made-up stats, events that did not
   happen).
 
+When sources disagree, trust official and company-reported figures over blogs,
+and full-year totals over quarterly ones when the claim is about a year.
+
+Only use figures that appear in the research notes. Never fill in a number
+from memory. If the notes do not contain the real figure, say in
+correct_fact that the actual figure could not be confirmed from the sources.
+
 Be strict. If the claim uses an old number while a newer one exists, it is
 "Inaccurate" even if the old number was once right. Do not guess beyond the
 evidence. If the evidence is thin, say so and lower the confidence.
@@ -129,12 +140,27 @@ async def extract_claims(text: str, oidc: str | None = None) -> list[dict]:
 
 
 async def research(claim: str, query: str, oidc: str | None = None) -> dict:
-    return await chat(
-        SEARCH_MODEL,
-        [{"role": "user", "content": RESEARCH_PROMPT.format(today=today(), claim=claim, query=query)}],
-        oidc=oidc,
-        timeout=60,
-    )
+    if SEARCH_BACKEND == "serpapi":
+        return {**await serpapi_search(query), "engine": "google-serpapi"}
+    try:
+        res = await chat(
+            SEARCH_MODEL,
+            [{"role": "user", "content": RESEARCH_PROMPT.format(today=today(), claim=claim, query=query)}],
+            oidc=oidc,
+            timeout=60,
+            allow_fallback=False,  # a fallback model without search would just guess
+        )
+        return {**res, "engine": SEARCH_MODEL}
+    except LLMError:
+        pass
+    # Sonar is unavailable (no credits, outage). Use Google via SerpAPI if a
+    # key is set, otherwise Wikipedia, which needs no key.
+    if os.getenv("SERPAPI_API_KEY"):
+        try:
+            return {**await serpapi_search(query), "engine": "google-serpapi"}
+        except Exception:
+            pass
+    return {**await wikipedia_search(claim, query), "engine": "wikipedia"}
 
 
 async def judge(claim: str, evidence: str, sources: list[dict], oidc: str | None = None) -> dict:
@@ -152,7 +178,7 @@ async def verify_claim(claim: str, query: str | None = None, oidc: str | None = 
     query = query or claim
     try:
         found = await research(claim, query, oidc)
-    except LLMError:
+    except Exception:
         # one retry, search providers time out now and then
         await asyncio.sleep(1)
         found = await research(claim, query, oidc)
@@ -167,7 +193,9 @@ async def verify_claim(claim: str, query: str | None = None, oidc: str | None = 
         verdict = "False"
 
     known = {s["url"]: s for s in sources}
-    picked = [u for u in result.get("source_urls") or [] if isinstance(u, str) and u.startswith("http")]
+    # only keep links that actually came back from the search, models
+    # sometimes invent plausible looking URLs
+    picked = [u for u in result.get("source_urls") or [] if u in known]
     if not picked:
         picked = [s["url"] for s in sources[:3]]
 
@@ -183,4 +211,5 @@ async def verify_claim(claim: str, query: str | None = None, oidc: str | None = 
         "confidence": confidence,
         "sources": [known.get(u, {"url": u, "title": ""}) for u in picked[:3]],
         "evidence": evidence,
+        "search_engine": found.get("engine", ""),
     }
