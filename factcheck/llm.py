@@ -92,6 +92,7 @@ async def chat(
         if only and name != only:
             continue
         if _skip_until.get(name, 0) > now:
+            errors.append(f"{name} skipped, it refused the last request (no credits or bad key)")
             continue
 
         models = MODELS[name][task]
