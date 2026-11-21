@@ -1,30 +1,27 @@
 """Claim extraction and verification.
 
 Flow for one document:
-  1. extract_claims()  - one LLM call pulls out checkable facts as JSON
-  2. verify_claim()    - per claim:
-       a. research()   - Perplexity Sonar searches the live web and writes up
-                         what current sources say, with links
-       b. judge()      - a second model compares the claim to that write-up
-                         and returns Verified / Inaccurate / False
+  1. extract_claims()  one model call pulls the checkable facts out as JSON
+  2. verify_claim()    per claim:
+       a. research()   collect evidence: Perplexity Sonar if the gateway is
+                       available, else Google (SerpAPI) if a key is set,
+                       else Wikipedia
+       b. judge()      a model compares the claim to the evidence and returns
+                       Verified / Inaccurate / False with the real figure
+       c. if the judge says the evidence is thin and Groq is set up, run a
+          live web search (Groq browser_search) and judge again
 
-Search and judging are split on purpose. Sonar is good at finding pages but
-tends to be generous when asked for a verdict; a separate judge with strict
-rules is better at calling out outdated numbers.
+Search and judging are split on purpose. Search models are good at finding
+pages but go easy on a claim when asked for a verdict; a separate judge with
+strict rules is better at calling out outdated numbers.
 """
-import asyncio
 import os
 from datetime import date
 
-from .llm import LLMError, chat, parse_json
+from .llm import LLMError, available, chat, parse_json
 from .search import serpapi_search, wikipedia_search
 
-EXTRACT_MODEL = os.getenv("EXTRACT_MODEL", "openai/gpt-4.1-mini")
-SEARCH_MODEL = os.getenv("SEARCH_MODEL", "perplexity/sonar")
-JUDGE_MODEL = os.getenv("JUDGE_MODEL", "openai/gpt-4.1")
 MAX_CLAIMS = int(os.getenv("MAX_CLAIMS", "20"))
-SEARCH_BACKEND = os.getenv("SEARCH_BACKEND", "sonar")  # or "serpapi"
-
 VERDICTS = ("Verified", "Inaccurate", "False")
 
 
@@ -56,7 +53,7 @@ Rules:
 Return JSON only:
 {{"claims": [{{"claim": "...", "quote": "short exact quote from the text",
 "category": "statistic|date|financial|technical|person|other",
-"search_query": "a good web search query to check this"}}]}}"""
+"search_query": "a neutral web search query that would find the true figure. Leave out the document's own number, e.g. 'Tesla vehicle deliveries 2023', not 'Tesla 5 million deliveries'"}}]}}"""
 
 
 RESEARCH_PROMPT = """Today is {today}. Find the most recent, reliable facts that
@@ -76,7 +73,7 @@ JUDGE_PROMPT = """You are the final checker in a fact-checking tool. Today is {t
 Claim from the uploaded document:
 "{claim}"
 
-Research notes from a live web search:
+Research notes from live sources:
 ---
 {evidence}
 ---
@@ -109,27 +106,37 @@ Return JSON only:
   "correct_fact": "the accurate, current fact in one sentence with the real figure and its date. For Verified, restate the confirmed fact.",
   "explanation": "one or two plain sentences on why",
   "confidence": 0-100,
-  "source_urls": ["most relevant links from the list above, best first, max 3"]}}"""
+  "source_urls": ["most relevant links from the list above, best first, max 3"],
+  "enough_evidence": true if the notes clearly settle the claim and contain the real figure, otherwise false}}"""
+
+
+WEB_PROMPT = """Today is {today}. Use web search to check this claim:
+"{claim}"
+
+Find the latest reliable figure or fact (official sources, company reports,
+statistics bodies, major news). Report the real figure, the date it refers
+to, and the source names with URLs. Be brief."""
 
 
 async def extract_claims(text: str, oidc: str | None = None) -> list[dict]:
-    res = await chat(
-        EXTRACT_MODEL,
-        [
-            {"role": "system", "content": EXTRACT_PROMPT.format(today=today(), max_claims=MAX_CLAIMS)},
-            {"role": "user", "content": text},
-        ],
-        oidc=oidc,
-        json_mode=True,
-    )
-    data = parse_json(res["content"])
+    messages = [
+        {"role": "system", "content": EXTRACT_PROMPT.format(today=today(), max_claims=MAX_CLAIMS)},
+        {"role": "user", "content": text},
+    ]
+    res = await chat("extract", messages, oidc=oidc, json_mode=True)
+    try:
+        data = parse_json(res["content"])
+    except (LLMError, ValueError):
+        res = await chat("extract", messages, oidc=oidc, json_mode=True)
+        data = parse_json(res["content"])
+
     claims = []
-    for i, c in enumerate(data.get("claims", [])[:MAX_CLAIMS]):
+    for c in data.get("claims", [])[:MAX_CLAIMS]:
         if not isinstance(c, dict) or not c.get("claim"):
             continue
         claims.append(
             {
-                "id": i + 1,
+                "id": len(claims) + 1,
                 "claim": c["claim"].strip(),
                 "quote": (c.get("quote") or "").strip(),
                 "category": c.get("category") or "other",
@@ -140,79 +147,85 @@ async def extract_claims(text: str, oidc: str | None = None) -> list[dict]:
 
 
 async def research(claim: str, query: str, oidc: str | None = None) -> dict:
-    if SEARCH_BACKEND == "serpapi":
-        return {**await serpapi_search(query), "engine": "google-serpapi"}
-    try:
-        res = await chat(
-            SEARCH_MODEL,
-            [{"role": "user", "content": RESEARCH_PROMPT.format(today=today(), claim=claim, query=query)}],
-            oidc=oidc,
-            timeout=60,
-            allow_fallback=False,  # a fallback model without search would just guess
-        )
-        return {**res, "engine": SEARCH_MODEL}
-    except LLMError:
-        pass
-    # Sonar is unavailable (no credits, outage). Use Google via SerpAPI if a
-    # key is set, otherwise Wikipedia, which needs no key.
+    if "gateway" in available(oidc):
+        try:
+            prompt = RESEARCH_PROMPT.format(today=today(), claim=claim, query=query)
+            res = await chat("search", [{"role": "user", "content": prompt}], oidc=oidc, only="gateway", timeout=60)
+            return {**res, "engine": "perplexity-sonar"}
+        except LLMError:
+            pass
     if os.getenv("SERPAPI_API_KEY"):
         try:
-            return {**await serpapi_search(query), "engine": "google-serpapi"}
+            return {**await serpapi_search(query), "engine": "google"}
         except Exception:
             pass
     return {**await wikipedia_search(claim, query), "engine": "wikipedia"}
 
 
+async def web_search(claim: str, oidc: str | None = None) -> dict:
+    prompt = WEB_PROMPT.format(today=today(), claim=claim)
+    res = await chat("search", [{"role": "user", "content": prompt}], oidc=oidc, only="groq", web_search=True)
+    return {**res, "engine": "web search"}
+
+
 async def judge(claim: str, evidence: str, sources: list[dict], oidc: str | None = None) -> dict:
-    links = ", ".join(s["url"] for s in sources[:8]) or "none"
-    res = await chat(
-        JUDGE_MODEL,
-        [{"role": "user", "content": JUDGE_PROMPT.format(today=today(), claim=claim, evidence=evidence, sources=links)}],
-        oidc=oidc,
-        json_mode=True,
-    )
-    return parse_json(res["content"])
+    links = ", ".join(s["url"] for s in sources[:10]) or "none"
+    messages = [{"role": "user", "content": JUDGE_PROMPT.format(today=today(), claim=claim, evidence=evidence, sources=links)}]
+    try:
+        res = await chat("judge", messages, oidc=oidc, json_mode=True)
+        return parse_json(res["content"])
+    except (LLMError, ValueError):
+        res = await chat("judge", messages, oidc=oidc, json_mode=True)  # bad JSON, try once more
+        return parse_json(res["content"])
+
+
+def _plain(text) -> str:
+    # model output sometimes has long dashes and odd hyphens; keep it plain
+    return str(text or "").replace("\u2014", "-").replace("\u2013", "-").replace("\u2011", "-").replace("\u202f", " ")
+
+
+def _confidence(value) -> int:
+    try:
+        return max(0, min(100, int(value)))
+    except (TypeError, ValueError):
+        return 50
 
 
 async def verify_claim(claim: str, query: str | None = None, oidc: str | None = None) -> dict:
     query = query or claim
-    try:
-        found = await research(claim, query, oidc)
-    except Exception:
-        # one retry, search providers time out now and then
-        await asyncio.sleep(1)
-        found = await research(claim, query, oidc)
-
+    found = await research(claim, query, oidc)
     evidence = found["content"].strip() or "No results."
     sources = found["citations"]
+    engines = [found["engine"]]
 
-    try:
-        result = await judge(claim, evidence, sources, oidc)
-    except (LLMError, ValueError):
-        result = await judge(claim, evidence, sources, oidc)  # bad JSON, try once more
+    result = await judge(claim, evidence, sources, oidc)
+
+    thin = not result.get("enough_evidence", True) or _confidence(result.get("confidence")) < 70
+    if thin and found["engine"] != "perplexity-sonar" and "groq" in available(oidc):
+        try:
+            extra = await web_search(claim, oidc)
+            evidence = f"{extra['content'].strip()}\n\n{evidence}"
+            sources = extra["citations"] + [s for s in sources if s not in extra["citations"]]
+            engines.insert(0, extra["engine"])
+            result = await judge(claim, evidence, sources, oidc)
+        except LLMError:
+            pass  # keep the first verdict
 
     verdict = str(result.get("verdict", "")).strip().capitalize()
     if verdict not in VERDICTS:
         verdict = "False"
 
-    known = {s["url"]: s for s in sources}
     # only keep links that actually came back from the search, models
     # sometimes invent plausible looking URLs
-    picked = [u for u in result.get("source_urls") or [] if u in known]
-    if not picked:
-        picked = [s["url"] for s in sources[:3]]
-
-    try:
-        confidence = max(0, min(100, int(result.get("confidence", 50))))
-    except (TypeError, ValueError):
-        confidence = 50
+    known = {s["url"]: s for s in sources}
+    picked = [u for u in result.get("source_urls") or [] if u in known] or [s["url"] for s in sources[:3]]
 
     return {
         "verdict": verdict,
-        "correct_fact": result.get("correct_fact", ""),
-        "explanation": result.get("explanation", ""),
-        "confidence": confidence,
-        "sources": [known.get(u, {"url": u, "title": ""}) for u in picked[:3]],
+        "correct_fact": _plain(result.get("correct_fact")),
+        "explanation": _plain(result.get("explanation")),
+        "confidence": _confidence(result.get("confidence")),
+        "sources": [known[u] for u in picked[:3] if u in known],
         "evidence": evidence,
-        "search_engine": found.get("engine", ""),
+        "search_engine": " + ".join(engines),
     }
