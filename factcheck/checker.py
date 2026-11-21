@@ -186,7 +186,10 @@ async def verify_claim(claim: str, query: str | None = None, oidc: str | None = 
     evidence = found["content"].strip() or "No results."
     sources = found["citations"]
 
-    result = await judge(claim, evidence, sources, oidc)
+    try:
+        result = await judge(claim, evidence, sources, oidc)
+    except (LLMError, ValueError):
+        result = await judge(claim, evidence, sources, oidc)  # bad JSON, try once more
 
     verdict = str(result.get("verdict", "")).strip().capitalize()
     if verdict not in VERDICTS:
