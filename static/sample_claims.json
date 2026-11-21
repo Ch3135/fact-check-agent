@@ -1,0 +1,130 @@
+[
+  {
+    "id": 1,
+    "page": 1,
+    "claim": "OpenAI launched ChatGPT in November 2020.",
+    "quote": "OpenAI launched ChatGPT in November 2020",
+    "category": "date",
+    "search_query": "OpenAI ChatGPT | original launch date"
+  },
+  {
+    "id": 2,
+    "page": 1,
+    "claim": "ChatGPT has around 100 million weekly active users.",
+    "quote": "ChatGPT has around 100 million weekly active users",
+    "category": "statistic",
+    "search_query": "OpenAI ChatGPT | latest reported weekly active users"
+  },
+  {
+    "id": 3,
+    "page": 1,
+    "claim": "Larry Page is Google's CEO.",
+    "quote": "Under CEO Larry Page",
+    "category": "person",
+    "search_query": "Google LLC | current CEO official leadership"
+  },
+  {
+    "id": 4,
+    "page": 1,
+    "claim": "India is the world's most populous country.",
+    "quote": "India is now the world's most populous country",
+    "category": "statistic",
+    "search_query": "India | most populous country United Nations latest population"
+  },
+  {
+    "id": 5,
+    "page": 1,
+    "claim": "India has a population of 1.21 billion people.",
+    "quote": "population of 1.21 billion people",
+    "category": "statistic",
+    "search_query": "India | current population United Nations World Population Prospects"
+  },
+  {
+    "id": 6,
+    "page": 1,
+    "claim": "The United States remains the world's largest economy.",
+    "quote": "The United States remains the largest economy",
+    "category": "financial",
+    "search_query": "United States | largest economy nominal GDP current US dollars IMF ranking"
+  },
+  {
+    "id": 7,
+    "page": 1,
+    "claim": "United States GDP is about 21 trillion US dollars.",
+    "quote": "a GDP of about 21 trillion US dollars",
+    "category": "financial",
+    "search_query": "United States | latest annual nominal GDP current US dollars BEA"
+  },
+  {
+    "id": 8,
+    "page": 1,
+    "claim": "Bill Gates founded Amazon.",
+    "quote": "Amazon, founded by Bill Gates in 1994",
+    "category": "person",
+    "search_query": "Amazon.com Inc. | founder corporate history"
+  },
+  {
+    "id": 9,
+    "page": 1,
+    "claim": "Amazon was founded in 1994.",
+    "quote": "Amazon, founded by Bill Gates in 1994",
+    "category": "date",
+    "search_query": "Amazon.com Inc. | founding year corporate history"
+  },
+  {
+    "id": 10,
+    "page": 1,
+    "claim": "Apple was founded in 1976.",
+    "quote": "Apple, founded in 1976",
+    "category": "date",
+    "search_query": "Apple Inc. | founding year corporate history"
+  },
+  {
+    "id": 11,
+    "page": 1,
+    "claim": "The first iPhone came out in 2007.",
+    "quote": "the first iPhone came out in 2007",
+    "category": "date",
+    "search_query": "Apple Inc. | first iPhone retail release date"
+  },
+  {
+    "id": 12,
+    "page": 1,
+    "claim": "Tesla delivered 5 million vehicles in 2023.",
+    "quote": "Tesla delivered 5 million vehicles in 2023 alone",
+    "category": "statistic",
+    "search_query": "Tesla, Inc. | full year 2023 total vehicle deliveries investor relations"
+  },
+  {
+    "id": 13,
+    "page": 1,
+    "claim": "Netflix has more than 500 million paid subscribers worldwide.",
+    "quote": "Netflix now has more than 500 million paid subscribers worldwide",
+    "category": "statistic",
+    "search_query": "Netflix Inc. | worldwide paid memberships latest shareholder letter"
+  },
+  {
+    "id": 14,
+    "page": 1,
+    "claim": "The Eiffel Tower was completed in 1889.",
+    "quote": "The Eiffel Tower was completed in 1889",
+    "category": "date",
+    "search_query": "Eiffel Tower | construction completion date official history"
+  },
+  {
+    "id": 15,
+    "page": 1,
+    "claim": "Mount Everest stands 8,849 metres tall.",
+    "quote": "Mount Everest stands 8,849 metres tall",
+    "category": "technical",
+    "search_query": "Mount Everest | official height Nepal China survey metres"
+  },
+  {
+    "id": 16,
+    "page": 1,
+    "claim": "The Great Wall of China is visible from the Moon with the naked eye.",
+    "quote": "the Great Wall of China is the only man-made structure visible from the Moon with the naked eye",
+    "category": "other",
+    "search_query": "Great Wall of China | naked-eye visibility from the Moon NASA"
+  }
+]

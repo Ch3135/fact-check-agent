@@ -156,7 +156,7 @@
 <script>
 const $ = (s) => document.querySelector(s);
 const fileInput = $("#file"), drop = $("#drop"), go = $("#go"), statusEl = $("#status");
-let file = null, claims = [], filter = "all", docName = "", mode = "live", busy = false;
+let file = null, claims = [], filter = "all", docName = "", mode = "live", busy = false, presetClaims = false;
 
 $("#today").textContent = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 
@@ -209,10 +209,11 @@ async function run() {
     res = await fetch("/api/extract", { method: "POST", body: form, signal: AbortSignal.timeout(110000) });
     if (!res.ok) throw new Error(await apiError(res));
     const data = await res.json();
+    presetClaims = data.extraction === "preset";
     docName = data.filename;
     claims = data.claims.map((c) => ({ ...c, state: "pending" }));
     if (!claims.length) { setStatus("No checkable claims found in the readable text.", true); return; }
-    $("#coverage").textContent = [docName, `${data.pages} pages`, data.truncated ? "Only the first 100 pages and 40,000 characters were scanned." : "", data.claim_limit_reached ? "The report reached the claim limit." : ""].filter(Boolean).join(" · ");
+    $("#coverage").textContent = [docName, `${data.pages} ${data.pages === 1 ? "page" : "pages"}`, presetClaims ? "Preset sample claims · live verification" : "", data.truncated ? "Only the first 100 pages and 40,000 characters were scanned." : "", data.claim_limit_reached ? "The report reached the claim limit." : ""].filter(Boolean).join(" · ");
     $("#summary").style.display = "block";
     render();
     await checkAll(claims);
@@ -293,6 +294,9 @@ async function checkAll(queue) {
   const failed = claims.filter((c) => c.state === "error").length;
   const unclear = claims.filter((c) => c.verdict === "Unsubstantiated").length;
   setStatus(`${claims.length} claims · ${bad} need correction · ${unclear} unsubstantiated` + (failed ? ` · ${failed} checks failed` : ""));
+  if (failed === claims.length && presetClaims) {
+    setStatus("Live verification is temporarily unavailable. View sample report for saved findings.", true);
+  }
   $("#retry").hidden = failed === 0;
   $("#csv").disabled = $("#json").disabled = false;
 }

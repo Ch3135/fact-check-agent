@@ -8,7 +8,7 @@ Upload a text-based PDF to verify checkable claims with current web evidence. Th
 
 ## Try it
 
-1. Upload your own PDF or choose **Check sample PDF** to run the included trap document through the live pipeline.
+1. Upload your own PDF or choose **Check sample PDF** to run live verification on the included trap document. The built-in PDF uses preset claims tied to its exact bytes, so a model outage during extraction cannot block the sample.
 2. Review the counts, filter the verdicts, and open the cited sources or search notes.
 3. If a provider is unavailable, **View sample report** opens a saved source review for four selected claims from the sample. It uses no API credits and is labelled separately in the app and exports.
 

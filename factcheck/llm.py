@@ -29,8 +29,8 @@ MODELS = {
     # Groq's free tier allows about 8k tokens a minute per model, so each
     # task has backups that are tried when the first one is rate limited.
     "groq": {
-        "extract": ["openai/gpt-oss-120b", "qwen/qwen3.8-27b"],
-        "judge": ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b"],
+        "extract": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"],
+        "judge": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"],
         "search": ["openai/gpt-oss-20b", "openai/gpt-oss-120b"],
     },
 }
@@ -133,7 +133,7 @@ async def _try_models(name, url, token, task, models, messages, json_mode, web_s
                 continue
             if r.status_code == 200:
                 return {**_unpack(r.json()), "provider": name, "model": model}
-            if r.status_code in (401, 402, 403):
+            if r.status_code in (401, 402) or (name == "gateway" and r.status_code == 403):
                 # no credits or bad key, skip this provider for a while
                 _skip_until[name] = time.time() + 300
                 errors.append(f"{name} {r.status_code}: {r.text[:200]}")

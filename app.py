@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
@@ -11,6 +12,9 @@ from factcheck.pdf_text import PdfError, extract_text
 
 MAX_UPLOAD = 4 * 1024 * 1024  # Vercel caps request bodies at about 4.5 MB
 STATIC = Path(__file__).parent / "static"
+SAMPLE_PDF = STATIC / "sample_trap.pdf"
+SAMPLE_BYTES = SAMPLE_PDF.read_bytes()
+SAMPLE_CLAIMS = json.loads((STATIC / "sample_claims.json").read_text(encoding="utf-8"))
 
 app = FastAPI(title="Fact-Check Agent")
 
@@ -27,7 +31,7 @@ def index():
 
 @app.get("/sample_trap.pdf")
 def sample_pdf():
-    return FileResponse(STATIC / "sample_trap.pdf", media_type="application/pdf", filename="sample_trap.pdf")
+    return FileResponse(SAMPLE_PDF, media_type="application/pdf", filename="sample_trap.pdf")
 
 
 @app.get("/sample_report.json")
@@ -53,12 +57,17 @@ async def extract(request: Request, file: UploadFile = File(...)):
     except PdfError as exc:
         raise HTTPException(422, str(exc)) from exc
 
-    try:
-        claims = await extract_claims(text, oidc_token(request))
-    except (LLMError, ValueError) as exc:
-        raise HTTPException(502, "Claim extraction is temporarily unavailable. Try again or open the sample report.") from exc
+    is_sample = data == SAMPLE_BYTES
+    if is_sample:
+        claims = SAMPLE_CLAIMS
+    else:
+        try:
+            claims = await extract_claims(text, oidc_token(request))
+        except (LLMError, ValueError) as exc:
+            raise HTTPException(502, "Claim extraction is temporarily unavailable. Try again in a moment.") from exc
 
     return {"filename": file.filename, "pages": pages, "truncated": truncated,
+            "extraction": "preset" if is_sample else "live",
             "claim_limit_reached": len(claims) > MAX_CLAIMS, "claims": claims[:MAX_CLAIMS]}
 
 
