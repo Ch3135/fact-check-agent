@@ -1,11 +1,11 @@
 """Backup search sources for when Perplexity Sonar is not available.
 
-Sonar (through the AI Gateway) does its own web search and is the default.
-These two are used if it fails:
+Sonar (through the AI Gateway) does its own web search and is used when the
+gateway is available. Otherwise:
   - SerpAPI (Google results), when SERPAPI_API_KEY is set
   - Wikipedia, which needs no key
-Set SEARCH_BACKEND=serpapi to skip Sonar and always use Google results.
 """
+import asyncio
 import os
 import re
 
@@ -55,6 +55,30 @@ def _words(text: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9][a-z0-9.,]*", text.lower()) if w not in STOP and len(w) > 2}
 
 
+async def _wiki_extract(client: httpx.AsyncClient, title: str) -> str:
+    # full-text extracts only come back one page per request
+    r = await client.get(WIKI_API, params={
+        "action": "query", "prop": "extracts", "explaintext": 1,
+        "titles": title, "format": "json", "redirects": 1,
+    })
+    r.raise_for_status()
+    pages = r.json()["query"]["pages"]
+    return next(iter(pages.values())).get("extract", "")
+
+
+def _best_sentences(text: str, keys: set[str], n: int) -> list[str]:
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", text) if 25 < len(s.strip()) < 600]
+
+    def score(s: str) -> float:
+        hits = len(keys & _words(s))
+        has_number = bool(re.search(r"\d", s))
+        recent = len(re.findall(r"\b20(2[3-9])\b", s))
+        return hits * 2 + has_number + recent * 0.5
+
+    ranked = sorted(sentences, key=score, reverse=True)
+    return [s for s in ranked[:n] if score(s) >= 3]
+
+
 async def wikipedia_search(claim: str, query: str, pages: int = 3) -> dict:
     async with httpx.AsyncClient(timeout=20, headers=WIKI_HEADERS) as client:
         r = await client.get(WIKI_API, params={
@@ -65,24 +89,16 @@ async def wikipedia_search(claim: str, query: str, pages: int = 3) -> dict:
         titles = [h["title"] for h in r.json()["query"]["search"]]
         if not titles:
             return {"content": "No results.", "citations": []}
+        texts = await asyncio.gather(*[_wiki_extract(client, t) for t in titles], return_exceptions=True)
 
-        r = await client.get(WIKI_API, params={
-            "action": "query", "prop": "extracts", "explaintext": 1,
-            "titles": "|".join(titles), "format": "json",
-        })
-        r.raise_for_status()
-        extracts = {p["title"]: p.get("extract", "") for p in r.json()["query"]["pages"].values()}
-
-    keys = _words(claim + " " + query)
+    keys = _words(query) | _words(claim)
     lines, sources = [], []
-    for title in titles:
-        text = extracts.get(title, "")
-        if not text:
+    for title, text in zip(titles, texts):
+        if isinstance(text, Exception) or not text:
             continue
-        sentences = re.split(r"(?<=[.!?])\s+", text)
-        intro = " ".join(sentences[:3])
-        scored = sorted(sentences[3:], key=lambda s: len(keys & _words(s)), reverse=True)[:6]
+        intro = " ".join(re.split(r"(?<=[.!?])\s+", text.strip())[:2])
+        best = _best_sentences(text, keys, 8)
         url = "https://en.wikipedia.org/wiki/" + title.replace(" ", "_")
-        lines.append(f"Wikipedia, {title} ({url}):\n{intro}\n" + "\n".join(f"- {s}" for s in scored))
+        lines.append(f"Wikipedia, {title} ({url}):\n{intro}\n" + "\n".join(f"- {s}" for s in best))
         sources.append({"url": url, "title": title})
     return {"content": "\n\n".join(lines) or "No results.", "citations": sources}
