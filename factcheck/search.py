@@ -1,9 +1,10 @@
 """Backup search sources for when Perplexity Sonar is not available.
 
-Sonar (through the AI Gateway) does its own web search and is used when the
-gateway is available. Otherwise:
+Sonar (through the AI Gateway) does its own web search and is the default.
+These two are used if it fails:
   - SerpAPI (Google results), when SERPAPI_API_KEY is set
   - Wikipedia, which needs no key
+Set SEARCH_BACKEND=serpapi to skip Sonar and always use Google results.
 """
 import asyncio
 import os

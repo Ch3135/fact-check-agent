@@ -179,11 +179,6 @@ async def judge(claim: str, evidence: str, sources: list[dict], oidc: str | None
         return parse_json(res["content"])
 
 
-def _plain(text) -> str:
-    # model output sometimes has long dashes and odd hyphens; keep it plain
-    return str(text or "").replace("\u2014", "-").replace("\u2013", "-").replace("\u2011", "-").replace("\u202f", " ")
-
-
 def _confidence(value) -> int:
     try:
         return max(0, min(100, int(value)))
@@ -222,8 +217,8 @@ async def verify_claim(claim: str, query: str | None = None, oidc: str | None = 
 
     return {
         "verdict": verdict,
-        "correct_fact": _plain(result.get("correct_fact")),
-        "explanation": _plain(result.get("explanation")),
+        "correct_fact": result.get("correct_fact", ""),
+        "explanation": result.get("explanation", ""),
         "confidence": _confidence(result.get("confidence")),
         "sources": [known[u] for u in picked[:3] if u in known],
         "evidence": evidence,
